@@ -155,15 +155,15 @@ class Sparkchain:
         while True:
             try:
                 print("1. Run With Free Proxy")
-                print("2. Run With Your Proxy")
-                print("3. Run Without Proxy")
+                print("2. Run Without Proxy")
+                print("3. Run With Proxy")
                 proxy_choice = int(input("Choose [1/2/3] -> ").strip())
 
                 if proxy_choice in [1, 2, 3]:
                     proxy_type = (
                         "Run With Free Proxy" if proxy_choice == 1 else 
-                        "Run With Your Proxy" if proxy_choice == 2 else 
-                        "Run Without Proxy"
+                        "Run Without Proxy" if proxy_choice == 2 else 
+                        "Run With Proxy"
                     )
                     print(f"{Fore.GREEN + Style.BRIGHT}{proxy_type} Selected.{Style.RESET_ALL}")
                     break
@@ -421,153 +421,4 @@ class Sparkchain:
             finally:
                 await session.close()
             
-    async def process_get_access_token(self, email: str, password: str, use_proxy: bool):
-        proxy = self.get_next_proxy_for_account(email) if use_proxy else None
-        token = None
-        while token is None:
-            token = await self.user_login(email, password, proxy)
-            if not token:
-                proxy = self.rotate_proxy_for_account(email) if use_proxy else None
-                await asyncio.sleep(5)
-                continue
-            
-            self.print_message(email, proxy, Fore.GREEN, "GET Access Token Success")
-            return token
-        
-    async def process_get_user_earning(self, email: str, token: str, use_proxy: bool):
-        while True:
-            proxy = self.get_next_proxy_for_account(email) if use_proxy else None
-
-            balance = "N/A"
-
-            user = await self.user_profile(email, token, proxy)
-            if user:
-                balance = user.get("total_points", 0)
-                self.print_message(email, proxy, Fore.WHITE, f"Earning Total: {balance} PTS")
-                
-            await asyncio.sleep(10 * 60)
-
-    async def process_complete_tasks(self, email: str, token: str, use_proxy: bool):
-        while True:
-            proxy = self.get_next_proxy_for_account(email) if use_proxy else None
-
-            tasks = await self.task_lists(email, token, proxy)
-            if tasks:
-                completed = False
-                for task in tasks:
-                    if task:
-                        task_id = task.get("id")
-                        title = task.get("name")
-                        amount = task.get("reward_amount")
-                        type = task.get("reward_type")
-
-                        completed_at = task.get("completed_at")
-                        if completed_at is None:
-                            complete = await self.complete_tasks(email, token, task_id, title, proxy)
-                            if complete:
-                                self.print_message(self.mask_account(email), proxy, Fore.WHITE, 
-                                    f"Task {title}"
-                                    f"{Fore.GREEN + Style.BRIGHT} Is Completed {Style.RESET_ALL}"
-                                    f"{Fore.MAGENTA + Style.BRIGHT}-{Style.RESET_ALL}"
-                                    f"{Fore.CYAN + Style.BRIGHT} Reward: {Style.RESET_ALL}"
-                                    f"{Fore.WHITE + Style.BRIGHT}{amount} {type}{Style.RESET_ALL}"
-                                )
-                    else:
-                        completed = True
-
-                if completed:
-                    self.print_message(self.mask_account(email), proxy, Fore.GREEN, 
-                        f"All Available Tasks Is Completed"
-                    )
-                
-            await asyncio.sleep(24 * 60 * 60)
-            
-    async def process_get_device_id(self, email: str, token: str, use_proxy: bool):
-        proxy = self.get_next_proxy_for_account(email) if use_proxy else None
-
-        devices = None
-        while devices is None:
-            devices = await self.user_device(email, token, proxy)
-            if not devices:
-                proxy = self.rotate_proxy_for_account(email) if use_proxy else None
-                await asyncio.sleep(5)
-                continue
-
-            device_id = devices[0].get("device_id")
-            
-            self.print_message(email, proxy, Fore.GREEN, "GET Device ID Success")
-            return device_id
-        
-    async def process_accounts(self, email: str, password: str, nodes_count: int, use_proxy: bool):
-        token = await self.process_get_access_token(email, password, use_proxy)
-        if token:
-
-            tasks = []
-
-            tasks.append(asyncio.create_task(self.process_get_user_earning(email, token, use_proxy)))
-            tasks.append(asyncio.create_task(self.process_complete_tasks(email, token, use_proxy)))
-
-            device_id = await self.process_get_device_id(email, token, use_proxy)
-            if device_id:
-                proxy = self.get_next_proxy_for_account(email) if use_proxy else None
-
-                if use_proxy:
-                    for i in range(nodes_count):
-                        tasks.append(asyncio.create_task(self.connect_websocket(email, token, device_id, proxy)))
-                        proxy = self.rotate_proxy_for_account(email)
-                else:
-                    tasks.append(asyncio.create_task(self.connect_websocket(email, token, device_id, proxy)))
-
-            await asyncio.gather(*tasks)
-        
-    async def main(self):
-        try:
-            accounts = self.load_accounts()
-            if not accounts:
-                self.log(f"{Fore.RED+Style.BRIGHT}No Accounts Loaded.{Style.RESET_ALL}")
-                return
-            
-            nodes_count, use_proxy_choice = self.print_question()
-
-            use_proxy = False
-            if use_proxy_choice in [1, 2]:
-                use_proxy = True
-
-            self.clear_terminal()
-            self.welcome()
-            self.log(
-                f"{Fore.GREEN + Style.BRIGHT}Account's Total: {Style.RESET_ALL}"
-                f"{Fore.WHITE + Style.BRIGHT}{len(accounts)}{Style.RESET_ALL}"
-            )
-
-            if use_proxy:
-                await self.load_proxies(use_proxy_choice)
-
-            self.log(f"{Fore.CYAN + Style.BRIGHT}-{Style.RESET_ALL}"*75)
-
-            while True:
-                tasks = []
-                for account in accounts:
-                    email = account.get('Email')
-                    password = account.get('Password')
-
-                    if "@" in email and password:
-                        tasks.append(self.process_accounts(email, password, nodes_count, use_proxy))
-
-                await asyncio.gather(*tasks)
-                await asyncio.sleep(10)
-
-        except Exception as e:
-            self.log(f"{Fore.RED+Style.BRIGHT}Error: {e}{Style.RESET_ALL}")
-            raise e
-
-if __name__ == "__main__":
-    try:
-        bot = Sparkchain()
-        asyncio.run(bot.main())
-    except KeyboardInterrupt:
-        print(
-            f"{Fore.CYAN + Style.BRIGHT}[ {datetime.now().astimezone(wib).strftime('%x %X %Z')} ]{Style.RESET_ALL}"
-            f"{Fore.WHITE + Style.BRIGHT} | {Style.RESET_ALL}"
-            f"{Fore.RED + Style.BRIGHT}[ EXIT ] Sparkchain AI - BOT{Style.RESET_ALL}                                       "                              
-        )
+    async def proces
